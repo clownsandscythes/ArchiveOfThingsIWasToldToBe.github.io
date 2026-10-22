@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>archive of things I was told to be</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #hint {
+    position: fixed; left: 0; right: 0; bottom: 8vh; text-align: center;
+    font: 300 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: .04em; color: rgba(255,255,255,.45);
+    transition: opacity 1.2s ease; pointer-events: none;
+  }
+  #hint.gone { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="A cardboard box labelled 'archive of things I was told to be', with a slit in the top. Drag to rotate it."></canvas>
+<div id="hint">Drag to turn the box</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  var canvas = document.getElementById('c');
+  var hint = document.getElementById('hint');
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x000000, 1);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  var scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x000000, 7, 15);
+
+  var camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
+  camera.position.set(0, 0, 7);
+
+  // ---------- cardboard textures ----------
+  function cardboard(draw) {
+    var c = document.createElement('canvas');
+    c.width = c.height = 1024;
+    var g = c.getContext('2d');
+    g.fillStyle = '#b48a5a';
+    g.fillRect(0, 0, 1024, 1024);
+    // mottled fibres
+    for (var i = 0; i < 9000; i++) {
+      var light = Math.random() > 0.5;
+      g.fillStyle = light ? 'rgba(255,232,190,' + (Math.random() * 0.09) + ')'
+                          : 'rgba(80,50,22,' + (Math.random() * 0.10) + ')';
+      g.fillRect(Math.random() * 1024, Math.random() * 1024, 1 + Math.random() * 14, 1 + Math.random() * 2);
+    }
+    // faint corrugation ridges
+    for (var y = 0; y < 1024; y += 8) {
+      g.fillStyle = 'rgba(70,42,18,0.055)';
+      g.fillRect(0, y, 1024, 3);
+    }
+    // worn edges
+    var grad = g.createRadialGradient(512, 512, 380, 512, 512, 760);
+    grad.addColorStop(0, 'rgba(60,35,12,0)');
+    grad.addColorStop(1, 'rgba(60,35,12,0.28)');
+    g.fillStyle = grad; g.fillRect(0, 0, 1024, 1024);
+    if (draw) draw(g);
+    var t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+
+  function writeLabel(g) {
+    var font = '"Times New Roman", Times, serif';
+    g.save();
+    g.translate(512, 512);
+    g.rotate(-0.04);
+    g.fillStyle = 'rgba(28,22,18,0.92)';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '128px ' + font;
+    g.fillText('archive of', 0, -170);
+    g.fillText('things I was', 0, -35);
+    g.fillText('told to be', 0, 100);
+    g.restore();
+  }
+
+  var frontTex = cardboard(writeLabel);
+  var sideTex = function () { return cardboard(null); };
+
+  // BoxGeometry face order: +x, -x, +y (top, replaced), -y, +z (front), -z
+  function side(map) {
+    return new THREE.MeshStandardMaterial({ map: map, roughness: 0.95, metalness: 0 });
+  }
+  var hiddenTop = new THREE.MeshBasicMaterial({ visible: false });
+  var mats = [side(sideTex()), side(sideTex()), hiddenTop, side(sideTex()), side(frontTex), side(sideTex())];
+
+  var box = new THREE.Group();
+  box.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), mats));
+
+  // Dark interior, visible only through the slit
+  box.add(new THREE.Mesh(
+    new THREE.BoxGeometry(1.96, 1.96, 1.96),
+    new THREE.MeshBasicMaterial({ color: 0x090604, side: THREE.BackSide })
+  ));
+
+  // ---------- top face with a real slit cut through it ----------
+  var top = new THREE.Shape();
+  top.moveTo(-1, -1); top.lineTo(1, -1); top.lineTo(1, 1); top.lineTo(-1, 1); top.lineTo(-1, -1);
+  var slit = new THREE.Path();
+  var sx = 0.62, sy = 0.04, cy = 0;          // half-length, half-width, centred on the top
+  slit.moveTo(-sx, cy - sy); slit.lineTo(sx, cy - sy); slit.lineTo(sx, cy + sy); slit.lineTo(-sx, cy + sy); slit.lineTo(-sx, cy - sy);
+  top.holes.push(slit);
+
+  var topTex = cardboard(function (g) {
+    // flap seam down the middle, where the two top flaps meet
+    g.fillStyle = 'rgba(40,24,8,0.55)'; g.fillRect(0, 509, 1024, 6);
+    g.fillStyle = 'rgba(255,235,200,0.22)'; g.fillRect(0, 515, 1024, 3);
+  });
+  topTex.repeat.set(0.5, 0.5);
+  topTex.offset.set(0.5, 0.5);
+
+  var topMesh = new THREE.Mesh(
+    new THREE.ShapeGeometry(top),
+    new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.95, metalness: 0, side: THREE.DoubleSide })
+  );
+  topMesh.rotation.x = -Math.PI / 2;
+  topMesh.position.y = 1.0;
+  box.add(topMesh);
+
+  box.rotation.set(0.55, -0.45, 0);
+  scene.add(box);
+
+  // ---------- light ----------
+  var key = new THREE.DirectionalLight(0xfff0dc, 1.15);
+  key.position.set(-3, 6, 4);
+  scene.add(key);
+  var rim = new THREE.PointLight(0x7d92d8, 0.5, 12);
+  rim.position.set(4, -2, -4);
+  scene.add(rim);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+
+  // ---------- interaction ----------
+  var dragging = false, lastX = 0, lastY = 0, vx = 0, vy = 0;
+  var idle = reduceMotion ? 0 : 0.0016;
+
+  canvas.addEventListener('pointerdown', function (e) {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    hint.classList.add('gone');
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    vx = dy * 0.006; vy = dx * 0.006;
+    box.rotation.x += vx; box.rotation.y += vy;
+  });
+  function end() { dragging = false; }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    camera.position.z = Math.min(11, Math.max(3.8, camera.position.z + e.deltaY * 0.004));
+  }, { passive: false });
+
+  function resize() {
+    var w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.position.z = Math.max(camera.position.z, w < h ? 8.5 : 0);
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function tick() {
+    if (!dragging) {
+      box.rotation.x += vx; box.rotation.y += vy + idle;
+      vx *= 0.95; vy *= 0.95;
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
